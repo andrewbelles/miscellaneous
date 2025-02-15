@@ -36,19 +36,11 @@ typedef void (*secure)(char, char*);
 static inline void encrypt(char key, char str[]) {
   int len = strlen(str), i, j, shift, wrap = 0;
 
-  // For some reason the key is shifted from g idk whatever 
-  shift = key - 'g';
   for (i = 0; i < len; i++) {
-    // Check for underscore and skip
     if (str[i] == '_') continue;
-
-    // If wraps set to 'base' char and add from there  
-    for (j = 0; j < shift; j++) {
-      if (str[i] == 'z') {
-        str[i] = 'a';
-      } else
-        str[i]++;   // Increment if it didn't wrap
-    }
+    str[i] += key;
+    str[i] -= 'z';
+    str[i] = 'z' + str[i] % 26;
   }
 }
 
@@ -58,6 +50,16 @@ static inline void decrypt(char key, char str[]) {
 
   // same structure and encrypt just wraps the other direction
   // sets 'base' char at 'z' instead of 'a' and decrements
+  //
+  //
+  for (i = 0; i < len; i++) {
+    if (str[i] == '_') continue;
+    str[i] -= key;
+    str[i] -= 'a';
+    str[i] = 'z' + str[i] % 26;
+  }
+
+  /*
   shift = key - 'g';
   for (i = 0; i < len; i++) {
     if (str[i] == '_') continue;
@@ -67,7 +69,7 @@ static inline void decrypt(char key, char str[]) {
       } else
         str[i]--;   // Decrement if it didn't wrap
     }
-  }
+  }*/
 }
 
 // Forces all chars to lower case
@@ -893,7 +895,7 @@ void sortTable(Table *table, int *saved) {
   }
   *saved = 0;
 
-  printf("\nDisplay Sorted Table (Y/N)? >> ");
+  printf("Display Sorted Table (Y/N)? >> ");
   scanf("%s", buffer);
   if (buffer[0] == 'Y' || buffer[0] == 'y') displayTable(table);
 
@@ -907,7 +909,7 @@ void saveTable(Table *table, int *saved) {
   FILE *wptr = NULL;
 
   // Create output file name 
-  printf("Enter an output file (example.txt) >> ");
+  printf("Enter an output recruit file (example.txt) >> ");
   scanf("%s", buffer);
   // Set expected .txt to end 
   wptr = fopen(buffer, "w");
@@ -930,6 +932,19 @@ void saveTable(Table *table, int *saved) {
     );
 
   }
+  fclose(wptr);
+
+  printf("Enter an output encryption file (example.txt) >> ");
+  scanf("%s", buffer);
+  wptr = fopen(buffer, "w");
+  if (wptr == NULL) {
+    printf("Unable to create file\n");
+    return;
+  }
+
+  for (i = 0; i < table->size; i++) 
+    fprintf(wptr, "%09d %c\n", table->keys[i].ssn, table->keys[i].val);
+
   *saved = 1;
 }
 
