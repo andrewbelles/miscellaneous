@@ -34,13 +34,14 @@ typedef void (*secure)(char, char*);
 
 // Recrypts a value based on its key 
 static inline void encrypt(char key, char str[]) {
-  int len = strlen(str), i, j, shift, wrap = 0;
-
+  int len = strlen(str), i;
+  
   for (i = 0; i < len; i++) {
     if (str[i] == '_') continue;
+
     str[i] += key;
     str[i] -= 'z';
-    str[i] = 'z' + str[i] % 26;
+    str[i] = 'a' + str[i] % 26;
   }
 }
 
@@ -54,22 +55,11 @@ static inline void decrypt(char key, char str[]) {
   //
   for (i = 0; i < len; i++) {
     if (str[i] == '_') continue;
+
     str[i] -= key;
     str[i] -= 'a';
     str[i] = 'z' + str[i] % 26;
   }
-
-  /*
-  shift = key - 'g';
-  for (i = 0; i < len; i++) {
-    if (str[i] == '_') continue;
-    for (j = 0; j < shift; j++) {
-      if (str[i] == 'a') {
-        str[i] = 'z';
-      } else
-        str[i]--;   // Decrement if it didn't wrap
-    }
-  }*/
 }
 
 // Forces all chars to lower case
@@ -138,7 +128,7 @@ void resize(Table *table, int *saved);
 void addEntry(Table *table, int *saved);
 void displayTable(const Table *table);
 void sortTable(Table *table, int *saved);
-void saveTable(Table *table, int *saved);     // Encrypt and print to specified file. 
+void saveTable(Table *table, int *saved, int indirect);     // Encrypt and print to specified file. 
 void loadData(Table *table, int *saved);
 int closeTable(Table *table, int saved);      // Free resources associated 
 
@@ -149,7 +139,7 @@ int main(int argc, char *argv[]) {
 
   int running = 1, entry_count = 0, scan = 0, iter = 0;
   // counters 
-  int entry = 0, key = 0, res = 0;
+  int entry = 0, key = 0, res = 0, saved = 0;
 
   // Initialize data contianer
   table.max  = INIT_SIZE;
@@ -199,7 +189,7 @@ int main(int argc, char *argv[]) {
   while (running == 1) {
     if (table.size == table.max) {
       // Resize arrays to 2x(curr_siz) (Both arrays)
-      resize(&table, (void *)0);
+      resize(&table, &saved);
     } 
 
     scan = fscanf(recruit_ptr, "%d", &table.list[entry].ssn);
@@ -299,7 +289,7 @@ int execute(Table *table, char cmd[], int i) {
     if (table->size + 1 > table->max) resize(table, &saved);
     addEntry(table, &saved);
   } else if (strcmp(cmd, "save") == 0) {
-    saveTable(table, &saved);
+    saveTable(table, &saved, 0);
   } else if (strcmp(cmd, "load") == 0) {
     loadData(table, &saved);
   } else if (strcmp(cmd, "close") == 0) {
@@ -307,6 +297,9 @@ int execute(Table *table, char cmd[], int i) {
   } else {
     return 1;
   }
+
+  // Call indirect save
+  saveTable(table, &saved, 1);
 
   return 0;         // Successful execution 
 }
@@ -351,9 +344,14 @@ void resize(Table *table, int *saved) {
   free(table->list);
   free(table->keys);
 
-  // Take ownership of ptr to memory -> b = a 
-  table->list = tmp.list;
-  table->keys = tmp.keys;
+  table->list = (Entry *)malloc(table->max * sizeof(Entry));
+  table->keys = (Key *)malloc(table->max * sizeof(Key));
+
+  memcpy(table->list, tmp.list, table->max * sizeof(Entry));
+  memcpy(table->keys, tmp.list, table->max * sizeof(Key));
+  
+  free(tmp.list);
+  free(tmp.keys);
   *saved = 0;
 }
 
@@ -389,8 +387,8 @@ void delete(Table *table, int index, int *saved) {
   int i, new = 0;
   Table tmp;
   // Create memory for temp list
-  tmp.list = (Entry *)malloc((table->size - 1) * sizeof(Entry));
-  tmp.keys = (Key *)malloc((table->size - 1) * sizeof(Key));
+  tmp.list = (Entry *)malloc(table->max * sizeof(Entry));
+  tmp.keys = (Key *)malloc(table->max * sizeof(Key));
 
   // Iterate over list. If list index matches than don't copy it else copy 
   for (i = 0; i < table->size; i++) {
@@ -404,10 +402,17 @@ void delete(Table *table, int index, int *saved) {
   table->size--;
   free(table->list);
   free(table->keys);
+  
+  // Copy memory back
+  table->list = (Entry *)malloc(table->max * sizeof(Entry));
+  table->keys = (Key *)malloc(table->max * sizeof(Key));
 
-  // Transfer ownership of list and keys ptrs to master table 
-  table->list = tmp.list;
-  table->keys = tmp.keys;
+  memcpy(table->list, tmp.list, table->max * sizeof(Entry));
+  memcpy(table->keys, tmp.keys, table->max * sizeof(Key));
+
+  free(tmp.list);
+  free(tmp.keys);
+
   *saved = 0;
 }
 
@@ -655,12 +660,12 @@ void displayTable(const Table *table) {
   int i;
 
   // heading 
-  printf("/------------------------------------------------------------------------\\\n");
-  printf("|    SSN    |      LAST        |     FIRST        | YYT |   PERFORMANCE  |\n");
-  printf("|-----------+------------------+------------------+-----+----------------|\n");
+  printf("/--------------------------------------------------------------------------------------------------------\\\n");
+  printf("|    SSN    |              LAST                |             FIRST                | YYT |   PERFORMANCE  |\n");
+  printf("|-----------+----------------------------------+----------------------------------+-----+----------------|\n");
 
   for (i = 0; i < table->size; i++) {
-    printf("| %09d | %16s | %16s | %3s | %5d  %5d   |\n",
+    printf("| %09d | %32s | %32s | %3s | %5d  %5d   |\n",
       table->list[i].ssn,
       table->list[i].last,
       table->list[i].first,
@@ -671,9 +676,8 @@ void displayTable(const Table *table) {
   }
 
   // bottom heading 
-  printf("\\------------------------------------------------------------------------/\n");
+  printf("\\--------------------------------------------------------------------------------------------------------/\n");
 }
-
 
 // Simple swap of two values
 static void swapT(Table *table, int index) {
@@ -903,16 +907,20 @@ void sortTable(Table *table, int *saved) {
   free(arrayS);
 }
 
-void saveTable(Table *table, int *saved) {
-  char buffer[64], *end;
+void saveTable(Table *table, int *saved, int indirect) {
+  static char recruit_buffer[64], code_buffer[64];
+  static int file_stored;
   int i, len = 0;
   FILE *wptr = NULL;
 
-  // Create output file name 
-  printf("Enter an output recruit file (example.txt) >> ");
-  scanf("%s", buffer);
+  // Create output file name
+  if (indirect != 1 || file_stored != 1) {
+    printf("Enter an output recruit file (example.txt) >> ");
+    scanf("%s", recruit_buffer);
+    file_stored = 1;
+  }
   // Set expected .txt to end 
-  wptr = fopen(buffer, "w");
+  wptr = fopen(recruit_buffer, "w");
   if (wptr == NULL) {
     printf("Unable to create file\n");
     return;
@@ -934,9 +942,13 @@ void saveTable(Table *table, int *saved) {
   }
   fclose(wptr);
 
-  printf("Enter an output encryption file (example.txt) >> ");
-  scanf("%s", buffer);
-  wptr = fopen(buffer, "w");
+  if (indirect != 1 || file_stored != 1) {
+    printf("Enter an output encryption file (example.txt) >> ");
+    scanf("%s", code_buffer);
+    file_stored = 1;
+  }
+
+  wptr = fopen(code_buffer, "w");
   if (wptr == NULL) {
     printf("Unable to create file\n");
     return;
@@ -1014,7 +1026,7 @@ void loadData(Table *table, int *saved) {
 
 int closeTable(Table *table, int saved) {
   // Force Save to File 
-  if (saved == 0) saveTable(table, &saved);
+  if (saved == 0) saveTable(table, &saved, 1);
 
   // Free data afterwards
   free(table->list);
