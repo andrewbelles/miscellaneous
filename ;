@@ -1,0 +1,54 @@
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h> 
+
+#define CLAY_IMPLEMENTATION 
+#include "clay.h"
+
+static const uint32_t FONT_ID = 0; 
+
+static const Clay_Color COLOR_ORANGE = (Clay_Color) {225, 138, 50, 255};
+static const Clay_Color COLOR_BLUE   = (Clay_Color) {111, 173, 162, 255};
+static const Clay_Color COLOR_LIGHT  = (Clay_Color) {224, 215, 210, 255};
+
+Clay_Arena init_clay() {
+  uint32_t total_memory = Clay_MinMemorySize();
+  Clay_Arena arena = Clay_CreateArenaWithCapacityAndMemory(total_memory, 0);
+
+
+}
+
+int main(void) {
+  // Create socket and configure address 
+  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  struct sockaddr_in address = {
+    .sin_family = AF_INET,
+    .sin_addr.s_addr = INADDR_ANY,
+    .sin_port = htons(8080)
+  };
+
+  // Bind socket to address 
+  int status = bind(fd, (struct sockaddr*)&address, sizeof(address));
+
+  // Listen for connections to web server 
+  listen(fd, 5);
+
+  // Run continuously 
+  int client_socket; 
+
+  // Simulate hardcoded respose 
+  const char *response = 
+    "HTTP/1.1 200 OK\r\n"
+    "Content-Type: text/plain\r\n\r\n"
+    "Test\r\n";
+
+  while (1) {
+    client_socket = accept(fd, NULL, NULL);
+
+    send(client_socket, response, strlen(response), 0);
+
+    close(client_socket);
+  }
+}
