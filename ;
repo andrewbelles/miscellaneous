@@ -64,8 +64,7 @@ public:
       { 
         .id = id,
         .runtime = 0.0,
-        .result = results_[0].result, 
-        .speedup = 1.0
+        .result = results_[0].result 
       }
     );
   }
@@ -129,37 +128,25 @@ public:
     return true;
   }
 
-  // Prints all results
+  // Prints all results stored in class
   void get_results()
   {
     // Sort before display
     sort_results();
 
-    // Header
     std::cout << std::left << std::setw(32) << "ID"
-              << std::setw(16) << "Runtime"
-              << std::setw(16) << "Speedup"
-              << std::setw(16) << "Error"
-              << std::endl;
-    std::cout << "---------------------------------------------------------------------------"
-              << std::endl;
+              << std::right << std::setw(12) << "Runtime"
+              << std::setw(12) << "Speedup"
+              << std::setw(12) << "Error"
+    std::cout << std::endl
+    std::cout << "---------------------------------------------------\n";
 
     for (size_t i = 0; i < functions_.size(); i++)
     {
-      std::cout << std::left << std::setw(32) << results_[i].id;
-      
-      std::ostringstream runtime_str;
-      runtime_str << std::fixed << std::setprecision(4) << results_[i].runtime << " ns";
-      std::cout << std::left << std::setw(16) << runtime_str.str();
-      
-      // Speedup column (with "x fast" as part of the formatted string)
-      std::ostringstream speedup_str;
-      speedup_str << std::fixed << std::setprecision(6) << results_[i].speedup << "x fast";
-      std::cout << std::left << std::setw(16) << speedup_str.str();
-      
-      // Error column
-      std::cout << std::fixed << std::setprecision(6) << results_[i].result;
-      
+      std::cout << std::left << std::setw(32) << results_[i].id
+                << std::right << std::setw(9) << results_[i].runtime << " ns"
+                << std::setw(8) << results_[i].speedup << "x fast"
+                << std::setw(12) << results_[i].result;
       std::cout << std::endl;
     }
   }
@@ -202,7 +189,7 @@ private:
       {
         .id      = "Baseline",
         .runtime = average_runtime,
-        .result  = result_value,
+        .result  = result_value
         .speedup = 1.0
       }
     );
