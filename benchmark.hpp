@@ -2,13 +2,14 @@
 #define BENCHMARK_HPP
 
 // Simple Abstraction 
+#include <cmath>
 #include <utility>
 #include <vector>
 #include <tuple> 
 #include <functional>
 
 // Template Abstraction
-#include <concepts>
+// #include <concepts>
 #include <iterator>
 #include <type_traits>
 
@@ -123,7 +124,7 @@ class BenchmarkSimple : public BenchmarkRoot
 {
 public:
   // Prints all results for benchmark matching template<E,R,Args>
-  void get_results()
+  void print()
   {
     // Sort before display
     sort();
@@ -143,9 +144,8 @@ public:
     {
       std::cout << std::left << std::setw(32) << results_[i].data_.id;
       
-      std::ostringstream runtime_str;
-      runtime_str << std::fixed << std::setprecision(4) << results_[i].data_.runtime << " ns";
-      std::cout << std::left << std::setw(16) << runtime_str.str();
+      std::string runtime_str = format_runtime_string(results_[i].data_.runtime);
+      std::cout << std::left << std::setw(16) << runtime_str;
       
       // Speedup column (with "x fast" as part of the formatted string)
       std::ostringstream speedup_str;
@@ -200,6 +200,49 @@ protected:
   void swap_result_struct(size_t first, size_t second) override 
   {
     std::swap(results_[first], results_[second]);
+  }
+private:
+  
+  std::string format_runtime_string(double runtime)
+  {
+    std::ostringstream ss_result;
+    
+    // Check for empty runtime if user prints table without running 
+    if (runtime == 0.0)
+    {
+      ss_result << "0.0000 s";
+      return ss_result.str();
+    }
+
+    // Get power of ten -> order of magnitude 
+    int order = static_cast<int>(std::floor(std::log10(std::abs(runtime))));
+    int prefix_idx = 0;
+
+    // Table of order prefix pairs 
+    const std::pair<int, const char*> prefix_table[] = 
+    {
+      {0, " ns"},
+      {1, " us"},
+      {2, " ms"},
+      {3, " s"},
+      {-1, " ps"}
+    };
+  
+    int group = order / 3;
+    for (int i = 0; i < 5; i++)
+    {
+      if (group <= prefix_table[i].first)
+      {
+        prefix_idx = i;
+        break;
+      }
+    }
+
+    runtime *= std::pow(10.0, -prefix_table[prefix_idx].first * 3);
+
+    ss_result << std::fixed << std::setprecision(4) << runtime << prefix_table[prefix_idx].second;
+
+    return ss_result.str();
   }
 };
 
@@ -326,10 +369,12 @@ private:
   std::vector<std::unique_ptr<void, std::function<void(void*)>>> copied_ptrs_;        // Empty if sizes_ is empty
   bool needs_copies_;
 
+  // Processes arguments based on their concept 
+  // Necessary for copying information as Simples, Containers, and Raw Pointers all have different copy methods
   template<size_t I>
   auto process_argument(auto&& arg)
   {
-    using ArgType = std::remove_reference_t<decltype(arg)>;
+    using ArgType = std::decay_t<decltype(arg)>;
 
     if constexpr (Simple<ArgType>)
     {
@@ -345,12 +390,12 @@ private:
     {
 
     // Argument must be a pointer thus a deep copy should be enacted 
-    using pointer_type = std::remove_pointer_t<decltype(arg)>;
+    using pointer_type = std::remove_pointer_t<ArgType>;
 
     size_t size = pointer_sizes_[I];
 
     auto* ptr_copy = new pointer_type[size];
-    std::copy(arg, arg + size, ptr_copy);
+    std::memcpy(ptr_copy, arg, size * sizeof(pointer_type));
 
     // Push into vector the new unique pointer and a delete method
     copied_ptrs_.push_back(
@@ -363,21 +408,31 @@ private:
     }
     else
     {
+      // Catch all for references that are still simple types 
       return std::forward<decltype(arg)>(arg);
     }
   }
 
+  // Check for raw pointer and its number of elements proceeding 
   template<size_t I, size_t J, typename... Ts>
   void pointer_size_pair(Ts... args)
   {
     if constexpr (J < sizeof...(Ts) && I < sizeof...(Ts))
     {
-      using first_arg  = std::tuple_element_t<I, std::tuple<Ts...>>;
-      using second_arg = std::tuple_element_t<J, std::tuple<Ts...>>;
+      using first_arg  = std::decay_t<std::tuple_element_t<I, std::tuple<Ts...>>>;
+      using second_arg = std::decay_t<std::tuple_element_t<J, std::tuple<Ts...>>>;
 
+      // Check for raw pointer array size pair to set the size at index
       if constexpr (PointerSizePair<first_arg, second_arg>)
       {
         pointer_sizes_[I] = std::get<J>(std::make_tuple(args...));
+      }
+      else 
+      {
+        // Set size to 1 for the pointer to simplfy how much information should be copied 
+        // Assume that a single raw pointer with no proceeding size is not an array but should 
+        //    still be copied
+        pointer_sizes_[I] = 1;
       }
     }
   }
