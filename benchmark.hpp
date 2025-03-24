@@ -21,16 +21,6 @@
 #include <cstring>
 #include <iomanip>
 
-/*
- * Class Heirarchy 
- * Root has the sort method and unique information that is identical across all benchmark classes
- * Each template type has a base class inheriting from the root class 
- *    Since error and return may or may not be present it will define the methods that 
- *    vary in that regard 
- *
- * Benchmark class varies in template and what is required for each template 
- */
-
 // Private Root class that all benchmarks derive from 
 namespace {
 
@@ -73,6 +63,9 @@ concept Integer = std::is_integral_v<T>;
 template<typename T, typename U>
 concept PointerSizePair = Pointer<T> && Integer<U>;
 
+template<typename T>
+concept Constant = std::is_const_v<T>;
+
 // Root class which all benchmarks inherit from 
 class BenchmarkRoot
 {
@@ -113,6 +106,48 @@ protected:
          }
        }
      }
+  }
+
+  std::string format_runtime_string(double runtime)
+  {
+    std::ostringstream ss_result;
+    
+    // Check for empty runtime if user prints table without running 
+    if (runtime == 0.0)
+    {
+      ss_result << "0.0000 s";
+      return ss_result.str();
+    }
+
+    // Get power of ten -> order of magnitude 
+    int order = static_cast<int>(std::floor(std::log10(std::abs(runtime))));
+    int prefix_idx = 0;
+
+    // Table of order prefix pairs 
+    const std::pair<int, const char*> prefix_table[] = 
+    {
+      {0, " ns"},
+      {1, " us"},
+      {2, " ms"},
+      {3, " s"},
+      {-1, " ps"}
+    };
+  
+    int group = order / 3;
+    for (int i = 0; i < 5; i++)
+    {
+      if (group <= prefix_table[i].first)
+      {
+        prefix_idx = i;
+        break;
+      }
+    }
+
+    runtime *= std::pow(10.0, -prefix_table[prefix_idx].first * 3);
+
+    ss_result << std::fixed << std::setprecision(4) << runtime << prefix_table[prefix_idx].second;
+
+    return ss_result.str();
   }
 };
 
@@ -185,7 +220,6 @@ protected:
     results_.clear();
   }
 
-
   // Implementation of virtual methods to be inherited by Benchmark
   size_t get_result_count() const override
   {
@@ -203,47 +237,6 @@ protected:
   }
 private:
   
-  std::string format_runtime_string(double runtime)
-  {
-    std::ostringstream ss_result;
-    
-    // Check for empty runtime if user prints table without running 
-    if (runtime == 0.0)
-    {
-      ss_result << "0.0000 s";
-      return ss_result.str();
-    }
-
-    // Get power of ten -> order of magnitude 
-    int order = static_cast<int>(std::floor(std::log10(std::abs(runtime))));
-    int prefix_idx = 0;
-
-    // Table of order prefix pairs 
-    const std::pair<int, const char*> prefix_table[] = 
-    {
-      {0, " ns"},
-      {1, " us"},
-      {2, " ms"},
-      {3, " s"},
-      {-1, " ps"}
-    };
-  
-    int group = order / 3;
-    for (int i = 0; i < 5; i++)
-    {
-      if (group <= prefix_table[i].first)
-      {
-        prefix_idx = i;
-        break;
-      }
-    }
-
-    runtime *= std::pow(10.0, -prefix_table[prefix_idx].first * 3);
-
-    ss_result << std::fixed << std::setprecision(4) << runtime << prefix_table[prefix_idx].second;
-
-    return ss_result.str();
-  }
 };
 
 // Simple case of simple error that uses return and non-void return type 
@@ -512,6 +505,21 @@ private:
       }
     );
   }
+};
+
+template<typename... Args>
+class Benchmark<void, void, Args...> : public BenchmarkRoot
+{
+public: 
+  // Void function 
+  using fn_benchmark = std::function<void(Args...)>;
+
+private:
+  std::vector<fn_benchmark> functions_;
+  std::tuple<Args...> args_;
+  std::tuple<Args...> copied_args_;
+  
+
 };
 
 #endif // BENCHMARK_HPP

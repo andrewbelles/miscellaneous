@@ -153,11 +153,48 @@ size_t naive_selection_sort_raw(T* x, size_t elements)
   return comparisons;
 }
 
+/*
+typedef struct Node {
+  int key;
+  struct Node *next; 
+} Hashtable;
+*/
+
 int main(void)
 {
   std::cout << "\nSimple Benchmark Test\n\n";
 
   float input = random_float();
+
+
+  /* TODO: Finish template<Error, void, ...Args>
+
+  auto* table = new Hashtable[37];
+  auto* base_table = new Hashtable[37];
+  
+  // void benchmark_function(Hashtable* table, int* values_to_hash, size_t n_elements);
+  // size_t error_function(void); 
+
+  auto error_function = [&table, &base_table]() { 
+    size_t difference = 0;
+    
+    for (size_t i = 0; i < 37; i++)
+    {
+      auto* curr = &table[i];
+      auto* base_curr = &base_table[i];
+      while (curr != nullptr && base_curr != nullptr)
+      {
+        if (curr->key != base_curr->key)
+        {
+          difference++;
+        }
+        curr = curr->next;
+        base_curr = base_curr->next;
+      }
+    }
+    return difference;
+  };
+  */
 
   auto error_function = [](float a, float b) { return a - b; };
   Benchmark<float, float, float> simple_benchmark(error_function, sqrt_wrapper, 1000000, input);
