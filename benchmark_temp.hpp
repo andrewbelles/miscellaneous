@@ -5,13 +5,14 @@
 #include <cmath>
 #include <utility>
 #include <vector>
-#include <tuple> 
-#include <functional>
 
 // Template Abstraction
-// #include <concepts>
+#include <tuple> 
+#include <functional>
+#include <any>
 #include <iterator>
 #include <type_traits>
+#include <typeindex>
 
 // Timings
 #include <chrono>
@@ -20,9 +21,6 @@
 #include <iostream>
 #include <cstring>
 #include <iomanip>
-
-// Private Root class that all benchmarks derive from 
-namespace {
 
 // Complex separation of types to delineate benchmark classes 
 // Defines all problematic arguments that might be included in template  
@@ -70,8 +68,7 @@ concept Constant = std::is_const_v<T>;
 template<typename... Args> 
 class BenchmarkRoot
 {
-protected:
-
+public:
   // Unique indentifying data for all benchmarked functions
   struct Unique
   {
@@ -80,7 +77,10 @@ protected:
     float speedup;
   };
   
-  BenchmarkRoot(size_t iter) : iter_(iter) {}
+  BenchmarkRoot(size_t iter, Args... args) : 
+    iter_(iter),
+    args_(std::forward<Args>(args)...)
+  {}
 
   // Guaranteed Members
   size_t iter_;
@@ -253,16 +253,15 @@ protected:
   }
 };
 
-}
-
 // Simple Error, Simple Return, Arguments are not considered as this is handled by inheriting 
 template<typename Error, typename Return, typename... Args>
 class BenchmarkSimple : public BenchmarkRoot<Args...>
 {
-protected:
+public:
   // Capture Function Pointer for error defn
   using fn_error = std::function<Error(Return, Return)>;
   using Unique = typename BenchmarkRoot<Args...>::Unique;
+protected:
 
   // Define Result struct for Case
   struct Result
@@ -360,7 +359,7 @@ public:
     functions_.clear();
     functions_.push_back(bench);
 
-    this->prepare_args(std::make_index_sequence<sizeof...(Args)>{}, std::forward<Args>(args)...);
+    this->BenchmarkRoot<Args...>::prepare_args(std::make_index_sequence<sizeof...(Args)>{}, std::forward<Args>(args)...);
     this->needs_copies_ = !this->pointer_sizes_.empty() || (Container<Args> || ...);
 
     init_baseline();
@@ -368,6 +367,7 @@ public:
 
   void insert(fn_benchmark function, const std::string& id)
   {
+    // Set benchmark flags 
     if (this->has_ran) this->has_ran = false;
     this->to_benchmark_ = (this->to_benchmark_ == 0) 
       ? functions_.size() 
@@ -375,19 +375,13 @@ public:
 
     functions_.push_back(function);
 
-    this->results_.push_back(
-      (Result)
-      {
-      .data_ = (Unique)
-      {
-        .id      = id,
-        .runtime = 0.0, 
-        .speedup = 1.0
-      },
-      .result = Return(),
-      .error  = Error()
-      }
-    );
+    Result result;
+    result.data_.id = id;
+    result.data_.runtime = 0.0;
+    result.data_.speedup = 1.0;
+    result.result = Return();
+    result.error  = Error();
+    this->results_.push_back(result);
   }
 
   bool run()
@@ -415,11 +409,11 @@ public:
         if (this->needs_copies_)
         {
           // Recopy arguments to original per function to benchmark
-          this->copied_args_ = simple_arg_copy(std::make_index_sequence<sizeof...(Args)>{});
+          this->copied_args_ = this->BenchmarkRoot<Args...>::simple_arg_copy(std::make_index_sequence<sizeof...(Args)>{});
         }
         const size_t current_index = j - this->to_benchmark_;
         auto start = std::chrono::high_resolution_clock::now();
-        function_results[current_index] = std::apply(functions_[j], this->copied_args_);
+        function_results[current_index] = std::apply(functions_[j], this->BenchmarkRoot<Args...>::copied_args_);
         auto end = std::chrono::high_resolution_clock::now();
 
         auto runtime = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
@@ -489,20 +483,14 @@ private:
     // Take average 
     average_runtime /= this->iter_;
 
-    // Set baseline results 
-    this->results_.push_back(
-      (Result)
-      {
-      .data_ = (Unique)
-      {
-        .id      = "Baseline",
-        .runtime = average_runtime,
-        .speedup = 1.0
-      },
-      .result = baseline_result,
-      .error  = Error()
-      }
-    );
+    Result result;
+    result.data_.id = "Baseline";
+    result.data_.runtime = average_runtime;
+    result.data_.speedup = 1.0;
+    result.result = baseline_result;
+    result.error  = Error();
+
+    this->results_.push_back(result);
   }
 };
 
@@ -521,6 +509,9 @@ template<typename Error, typename... Args>
 class BenchmarkComplexError : public BenchmarkRoot<Args...>
 {
 public:
+  using fn_error = std::function<Error(void*, void*)>;
+  using Unique = typename BenchmarkComplexError<Args...>::Unique;
+
   // Prints all results for benchmark matching template<E,R,Args>
   void print()
   {
@@ -542,7 +533,7 @@ public:
     {
       std::cout << std::left << std::setw(32) << results_[i].data_.id;
       
-      std::string runtime_str = format_runtime_string(results_[i].data_.runtime);
+      std::string runtime_str = this->BenchmarkRoot<Args...>::format_runtime_string(results_[i].data_.runtime);
       std::cout << std::left << std::setw(16) << runtime_str;
       
       // Speedup column (with "x fast" as part of the formatted string)
@@ -559,8 +550,8 @@ public:
 
 protected:
   // Define empty error function 
-  using fn_error = std::function<Error()>;
-  using Unique = typename BenchmarkComplexError<Args...>::Unique;
+  // User must define the cast to struct properly in their error function! (Not my problem)
+  fn_error error_function;
 
   struct Result 
   {
@@ -568,9 +559,9 @@ protected:
     Error error; 
   };
 
-  BenchmarkComplexError(fn_error err, size_t iter) : 
-    error_function_(err),
-    BenchmarkRoot<Args...>(iter)
+  BenchmarkComplexError(fn_error err, size_t iter, Args... args) : 
+    BenchmarkRoot<Args...>(iter, args...),
+    error_function(err)
   {
     results_.clear();
   }
@@ -579,7 +570,6 @@ protected:
   // Called by constructor. Requires the fn_error to have some template for the 
   // type of what is encapsulated by it 
 
-  fn_error error_function_; 
   std::vector<Result> results_;
 
   // Implementation of virtual methods to be inherited by Benchmark
@@ -603,7 +593,203 @@ protected:
 template<typename Error, typename... Args>
 class Benchmark<Error, void, Args...> : public BenchmarkComplexError<Error, Args...>
 {
+public:
+  using fn_benchmark = std::function<void(Args...)>;
+  using fn_error = typename BenchmarkComplexError<Args...>::fn_error;
+  using Result = typename BenchmarkComplexError<Args...>::Result;
   using Unique = typename BenchmarkComplexError<Args...>::Unique;
+
+  // This specific template's constructor takes an additional template for the type to peel from copied args
+  template<typename S>
+  Benchmark(fn_error err, fn_benchmark bench, size_t iter, Args... args) : 
+    captured_type_(typeid(S)),
+    BenchmarkComplexError<Args...>(err, iter, args...) 
+  {
+    functions_.clear();
+    functions_.push_back(bench);
+
+    this->BenchmarkRoot<Args...>::prepare_args(std::make_index_sequence<sizeof...(Args)>{}, std::forward<Args>(args)...);
+    this->needs_copies_ = !this->pointer_sizes_.empty() || (Container<Args> || ...);
+
+    init_baseline<S>();
+  }
+
+  void insert(fn_benchmark function, const std::string& id)
+  {
+    // Set benchmark flags 
+    if (this->has_ran) this->has_ran = false;
+    this->to_benchmark_ = (this->to_benchmark_ == 0) 
+      ? functions_.size() 
+      : this->to_benchmark_;
+
+    functions_.push_back(function);
+
+    Result result;
+    result.data_.id = id;
+    result.data_.runtime = 0.0;
+    result.data_.speedup = 1.0;
+    result.error  = Error();
+
+    this->results_.push_back(result);
+  }
+
+  bool run()
+  {
+    // Check if any functions should be benchmarked
+    if (this->to_benchmark_ == 0) { return false; }
+    
+    const size_t n_functions = functions_.size();
+    if (n_functions == 1) { return false; }
+    
+    const size_t run_count = n_functions - this->to_benchmark_;
+
+    // Allocate arrays to hold results 
+    auto* average_runtime  = new double[run_count]();
+    std::vector<std::any> error_arguments(run_count); 
+
+    // Run the benchmark for each function that hasn't been ran
+    for (size_t i = 0; i < this->iter_; i++)
+    {
+      // Run for each function that hasn't been benchmarked 
+      for (size_t j = this->to_benchmark_; j < n_functions; j++)
+      {
+        // Check if we even need to recopy 
+        if (this->needs_copies_)
+        {
+          // Recopy arguments to original per function to benchmark
+          this->copied_args_ = simple_arg_copy(std::make_index_sequence<sizeof...(Args)>{});
+        }
+        const size_t current_index = j - this->to_benchmark_;
+        auto start = std::chrono::high_resolution_clock::now();
+        std::apply(functions_[j], this->copied_args_);
+        auto end = std::chrono::high_resolution_clock::now();
+
+        auto runtime = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
+        average_runtime[current_index] += static_cast<double>(runtime.count());
+
+        // Peel argument matching captured_type_ into error_arguments
+        if (i == this->iter_ - 1)
+        {
+          // NOTE: THIS FUNCTION IS DESIGNATED TO USE COPIED_ARGS_ GUARANTEED
+          error_arguments[current_index] = std::forward<captured_type_>(
+            get_first_of_type<captured_type_>(
+              std::make_index_sequence<sizeof...(Args)>{}
+            ));
+        }
+      }
+    }
+
+    // Collect runtime and custom error for each iteration 
+    for (size_t j = this->to_benchmark_; j < n_functions; j++)
+    {
+      const size_t current_index = j - this->to_benchmark_;
+      // Take average
+      average_runtime[current_index] /= this->iter_;
+      float speedup = this->results_[0].data_.runtime / average_runtime[current_index];
+
+      // Compute error for every collected value  
+      auto baseline = std::any_cast<captured_type_>(base_error_argument_);
+      auto current  = std::any_cast<captured_type_>(error_arguments[current_index]);
+      this->results_[j].error = this->error_function(&baseline, &current);
+
+      // Push results into public vector 
+      this->results_[j].data_.runtime = average_runtime[current_index];
+      this->results_[j].data_.speedup = speedup;
+    }
+
+    // Free memory
+    delete[] average_runtime;
+
+    // Reset to_benchmark_ to zero 
+    this->to_benchmark_ = 0;
+    this->has_ran = true;
+    return true;
+  }
+
+private:
+
+  std::type_index captured_type_;
+  std::any base_error_argument_;
+  std::vector<fn_benchmark> functions_;
+
+  // Run as normal. Peel type from copied_args_ at end.
+  void init_baseline()
+  {
+    double average_runtime = 0.0;
+
+    // Run for preset number of iterations 
+    for (size_t i = 0; i < this->iter_; i++)
+    {
+      // Check if we even need to recopy 
+      if (this->needs_copies_)
+      {
+        // Recopy arguments to original
+        this->copied_args_ = simple_arg_copy(std::make_index_sequence<sizeof...(Args)>{});
+      }
+      auto start = std::chrono::high_resolution_clock::now(); 
+      std::apply(functions_[0], this->copied_args_);          // Returns void  
+      // Collect result from first iteration 
+      auto end   = std::chrono::high_resolution_clock::now();
+      
+      auto runtime = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
+      // Accumulate runtime
+      average_runtime += static_cast<double>(runtime.count());
+    }
+
+    // Take average 
+    average_runtime /= this->iter_;
+
+    // Peel type from modified arguments copied_args_
+    // Since error_argument is unknown until the user calls constructor<S> we have to do it like this  
+    base_error_argument_ = std::forward<captured_type_>(get_first_of_type<captured_type_>(std::make_index_sequence<sizeof...(Args)>{}));
+
+    // Copy the argument locally to pass for comparison (For baseline) 
+    auto a = std::any_cast<captured_type_>(base_error_argument_);
+    auto b = std::any_cast<captured_type_>(base_error_argument_);
+
+    // Compute error 
+    Error base_error = this->error_function(&a, &b);
+
+    Result result;
+    result.data_.id = "Baseline";
+    result.data_.runtime = 0.0;
+    result.data_.speedup = 1.0;
+    result.error  = base_error;
+
+    this->results_.push_back(result);
+  }
+
+  // Checks all elements of tuple Args... against the template type
+  template<typename C, size_t... Is>
+  C& get_first_of_type(std::index_sequence<Is...>)
+  {
+    C* result = nullptr; 
+    
+    // Lambda get for all elements of Args... if they match type C and if so sets C to that value of matching type
+    [&]<size_t... Js>(std::index_sequence<Js...>) {
+      ((result = std::is_same_v<C, std::tuple_element_t<Js, std::tuple<Args...>>> ?
+        &std::get<Js>(this->copied_args_) : result), ...);
+    }(std::make_index_sequence<sizeof...(Args)>{});
+
+    // Error for if type is not contained within tuple
+    if (result != nullptr) {
+      throw std::runtime_error("Type not found within arguments!");
+    } 
+    return *result;
+  }
+
+  // Helper function that returns some boolean if it can find a matching type or not 
+  template<typename C, size_t I>
+  bool get_element(C*& result)
+  {
+    // Compare types of each element within the tuple 
+    if constexpr (std::is_same_v<std::remove_reference_t<C>,
+        std::remove_reference_t<std::tuple_element_t<I, std::tuple<Args...>>>>) {
+      result = &std::get<I>(this->copied_args_);
+      return true;
+    }
+    return false;
+  }
 };
 
 // Instance where no error is recorded and fn ptr follows void function(args)
@@ -616,12 +802,12 @@ public:
   using Unique = BenchmarkRoot<Args...>::Unique;
 
   Benchmark(fn_benchmark bench, size_t iter, Args... args) :
-    BenchmarkRoot<Args...>(iter)
+    BenchmarkRoot<Args...>(iter, args...)
   {
     functions_.clear();
     functions_.push_back(bench);
 
-    this->prepare_args(std::make_index_sequence<sizeof...(Args)>{}, std::forward<Args>(args)...);
+    this->BenchmarkRoot<Args...>::prepare_args(std::make_index_sequence<sizeof...(Args)>{}, std::forward<Args>(args)...);
     this->needs_copies_ = !this->pointer_sizes_.empty() || (Container<Args> || ...);
 
     init_baseline();
@@ -636,15 +822,11 @@ public:
 
     functions_.push_back(function);
 
-    // Initialize simple result 
-    this->data_.push_back(
-      (Unique)
-      {
-        .id      = id,
-        .runtime = 0.0, 
-        .speedup = 1.0
-      }
-    );
+    Unique unique;
+    unique.id = id; 
+    unique.runtime = 0.0;
+    unique.speedup = 1.0;
+    this->data_.push_back(unique);
   }
 
   bool run()
@@ -738,7 +920,7 @@ public:
 private:
   std::vector<fn_benchmark> functions_;
   std::vector<Unique> data_;
-  
+
   // No return value. No error to store as baseline 
   void init_baseline()
   {
@@ -766,16 +948,13 @@ private:
     // Take average 
     average_runtime /= this->iter_;
 
-    // Set baseline results 
-    this->data_.push_back(
-      (Unique)
-      {
-        .id      = "Baseline",
-        .runtime = average_runtime,
-        .speedup = 1.0
-      }
-    );
+    Unique unique;
+    unique.id = "Baseline"; 
+    unique.runtime = 0.0;
+    unique.speedup = 1.0;
+    this->data_.push_back(unique);
   }
+
 
 // Virtual overrides
 protected:
